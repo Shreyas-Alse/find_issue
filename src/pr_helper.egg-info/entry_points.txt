@@ -1,0 +1,2 @@
+[console_scripts]
+pr-helper = pr_helper.cli:main

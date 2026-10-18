@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pr-helper"
+version = "0.1.0"
+description = "Generate beginner-friendly GitHub contribution roadmaps from repository issues."
+requires-python = ">=3.10"
+dependencies = [
+    "PyGithub",
+    "python-dotenv",
+    "langchain-core",
+    "langchain-google-genai",
+    "requests",
+]
+
+[project.scripts]
+pr-helper = "pr_helper.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

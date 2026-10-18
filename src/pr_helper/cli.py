@@ -3,11 +3,11 @@ import argparse
 import time
 from datetime import datetime
 from typing import Any, List, Union
-from config_manager import get_credentials
+from pr_helper.config_manager import get_credentials
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-from git_finder import fetch_issues
+from pr_helper.git_finder import fetch_issues
 
 start_time = time.time()
 
@@ -71,7 +71,7 @@ class ContributorRoadmapPipeline:
         system_prompt = (
             "You are an open-source mentor. Given raw issue summaries, select 3 genuinely beginner-to-intermediate "
             "issues and produce a concise onboarding roadmap in GitHub-flavored Markdown. "
-            "Include prerequisites, issue links, and clear local verification steps. "
+            "Include prerequisites-highly technical, issue links, and clear local verification steps. "
             "Do NOT hallucinate CLI commands; if unverified, use generic instructions."
         )
 
