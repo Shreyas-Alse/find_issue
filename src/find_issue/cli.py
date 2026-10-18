@@ -133,7 +133,7 @@ class ContributorRoadmapPipeline:
         self.logger.log(f"[PRE-PROCESSED CONTEXT]\n{issue_context}")
 
         system_prompt = (
-            "You are an open-source mentor. Given raw issue summaries, select 3 genuinely beginner-to-intermediate. DO NOT TALK LIKE A PERSON "
+            "You are an open-source mentor. Given raw issue summaries, select 3 genuinely beginner-to-intermediate. Less than 3 are also fine if the issues are not at all  beginner level. DO NOT TALK LIKE A PERSON "
             "issues and produce a concise onboarding roadmap in GitHub-flavored Markdown. "
             "Include prerequisites-highly technical, issue links, and clear local verification steps. "
             "Do NOT hallucinate CLI commands; if unverified, use generic instructions."
