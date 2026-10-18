@@ -69,7 +69,7 @@ On the first run, the built-in **config manager** asks for your **GitHub PAT** a
 ## 🎯 Usage
 
 ```bash
-pr-helper --repo owner/repo
+find_issue --repo owner/repo
 ```
 
 ### Options
@@ -86,10 +86,10 @@ pr-helper --repo owner/repo
 
 ```bash
 # Basic run
-pr-helper --repo owner/repo
+find_issue --repo owner/repo
 
 # Look at 15 issues and save to a custom file
-pr-helper -r owner/repo -l 15 -o my_roadmap.md
+find_issue -r owner/repo -l 15 -o my_roadmap.md
 ```
 
 ### What you get
@@ -111,6 +111,50 @@ find_issue scans for both, using hardcoded **regex rules**:
 - ✅ If nothing matches, the roadmap gets a **"Security Verification: PASSED"** banner and the terminal reports `[PASSED]`
 
 > ⚠️ Pattern-based checks reduce risk but are not a guarantee. Always review the roadmap, the linked issues, and any command before running it.
+
+---
+
+## 📸 Sample Output
+
+Running it against a real repository:
+
+```text
+$ find_issue -r nextcloud/desktop
+-> Fetching 8 issues for nextcloud/desktop via API...
+-> Generating roadmap in a single pass...
+
+Execution complete:
+ - Log file: steps.txt
+ - Markdown roadmap: OUTPUT.md
+ - Security scan status: [PASSED]
+ - Total execution time: 22.48 seconds
+```
+
+And an excerpt of the generated `OUTPUT.md`:
+
+````markdown
+> [!NOTE]
+> ### Security Verification: PASSED
+> **Scan Timestamp:** 2026-10-18 16:52:11
+> No prompt injection signatures or destructive system commands detected by rule-based filters. Always review CLI commands before running them locally.
+
+---
+
+# Contributor Onboarding Roadmap: nextcloud/desktop
+
+## Selected Issues
+
+### 1. UI/UX Improvement: Persistent Sync Selection
+* **Issue:** [#11082](https://github.com/nextcloud/desktop/issues/11082)
+* **Difficulty:** Beginner
+* **Description:** The client prompts the user to "Choose how to sync your files" on every launch even after the user has selected "Decide later." This is a state persistence issue.
+* **Local Verification:**
+    1. Build and launch the client.
+    2. Select "Decide later" during the initial setup.
+    3. Restart the application.
+    4. **Fail condition:** The selection prompt appears again.
+    5. **Success condition:** The application launches directly to the main interface without the prompt.
+````
 
 ---
 
