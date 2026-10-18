@@ -2,8 +2,10 @@ import os
 import re
 import argparse
 import time
+import base64
+import requests
 from datetime import datetime
-from typing import Any, List, Union, Tuple
+from typing import Any, List, Union, Tuple, Optional
 
 from find_issue.config_manager import get_credentials
 from find_issue.git_finder import fetch_issues
@@ -12,6 +14,70 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 start_time = time.time()
+
+
+def fetch_repo_file(repo_name: str, file_path: str, token: Optional[str] = None) -> Optional[str]:
+    """Fetches a raw file or standard documentation from GitHub API."""
+    url = f"https://api.github.com/repos/{repo_name}/contents/{file_path}"
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            content = response.json().get("content", "")
+            return base64.b64decode(content).decode("utf-8", errors="ignore")
+    except Exception:
+        pass
+    return None
+
+
+def clean_markdown_for_tokens(md_text: str, max_chars: int = 2500) -> str:
+    """
+    Strips noise (badges, raw HTML, links, image tags) to keep 
+    architectural and setup context within strict token budgets.
+    """
+    if not md_text:
+        return ""
+
+    # Remove raw HTML tags and comments
+    text = re.sub(r"<!--.*?-->", "", md_text, flags=re.DOTALL)
+    text = re.sub(r"<[^>]+>", "", text)
+
+    # Strip badges and image markdown: [![...](...)](...) or ![...](...)
+    text = re.sub(r"\[!\[.*?\]\(.*?\)\]\(.*?\)", "", text)
+    text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
+
+    # Convert markdown links [text](url) -> text
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+
+    # Remove excessive blank lines and trailing whitespace
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    cleaned = "\n".join(lines)
+
+    # Truncate to token-safe character ceiling
+    if len(cleaned) > max_chars:
+        cleaned = cleaned[:max_chars] + "\n...[README truncated for token efficiency]..."
+
+    return cleaned
+
+
+def extract_repo_context(repo_name: str, token: Optional[str] = None) -> str:
+    """Attempts to fetch README.md (or variants) and contributing guidelines."""
+    candidates = ["README.md", "readme.md", "README", "CONTRIBUTING.md"]
+    found_docs = []
+
+    for filename in candidates:
+        content = fetch_repo_file(repo_name, filename, token)
+        if content:
+            cleaned = clean_markdown_for_tokens(content, max_chars=2000)
+            found_docs.append(f"--- Context from {filename} ---\n{cleaned}")
+            # If we retrieved both a README and CONTRIBUTING guide, exit early
+            if len(found_docs) >= 2:
+                break
+
+    return "\n\n".join(found_docs) if found_docs else "No repository documentation available."
 
 
 class SecurityScanner:
@@ -29,7 +95,6 @@ class SecurityScanner:
         r"forget\s+(all\s+)?previous\s+context",
     ]
 
-   
     MALICIOUS_CMD_PATTERNS = [
         r"rm\s+-(rf|fr|r)\b",                   # Destructive file removal
         r">\s*/dev/sd[a-z]",                    # Direct drive writes
@@ -49,9 +114,8 @@ class SecurityScanner:
 
         for pattern in cls.INJECTION_PATTERNS:
             if re.search(pattern, context_text, re.IGNORECASE):
-                flags.append(f"Prompt injection pattern detected in issue context: `{pattern}`")
+                flags.append(f"Prompt injection pattern detected in input context: `{pattern}`")
 
-        
         for pattern in cls.MALICIOUS_CMD_PATTERNS:
             match = re.search(pattern, output_text, re.IGNORECASE)
             if match:
@@ -122,27 +186,36 @@ class ContributorRoadmapPipeline:
             model=model_name,
             temperature=0.2,
             top_p=0.8,
-            max_output_tokens=2048,
         )
 
-    def run(self, repo_target: str, limit: int = 8) -> Tuple[str, str]:
+    def run(self, repo_target: str, limit: int = 8, github_token: Optional[str] = None) -> Tuple[str, str]:
+        print(f"-> Fetching repository documentation (README/CONTRIBUTING) for {repo_target}...")
+        repo_docs = extract_repo_context(repo_target, token=github_token)
+
         print(f"-> Fetching {limit} issues for {repo_target} via API...")
         issues = fetch_issues(repo_target, limit)
         issue_context = format_issues_compact(issues, repo_target, max_body_chars=350)
 
-        self.logger.log(f"[PRE-PROCESSED CONTEXT]\n{issue_context}")
+        combined_input_context = (
+            f"=== CODEBASE SUMMARY & SETUP GUIDELINES ===\n{repo_docs}\n\n"
+            f"=== OPEN ISSUES CONTEXT ===\n{issue_context}"
+        )
+
+        self.logger.log(f"[PRE-PROCESSED CONTEXT]\n{combined_input_context}")
 
         system_prompt = (
-            "You are an open-source mentor. Given raw issue summaries, select 3 genuinely beginner-to-intermediate. Less than 3 are also fine if the issues are not at all  beginner level. DO NOT TALK LIKE A PERSON "
-            "issues and produce a concise onboarding roadmap in GitHub-flavored Markdown. "
-            "Include prerequisites-highly technical, issue links, and clear local verification steps. "
-            "Do NOT hallucinate CLI commands; if unverified, use generic instructions."
+            "You are an open-source mentor. Analyze the codebase setup from the provided documentation "
+            "and match it against the open issues. Select up to 3 genuinely beginner-to-intermediate issues "
+            "(fewer than 3 is acceptable if issues are advanced). DO NOT TALK LIKE A PERSON. "
+            "Produce an onboarding roadmap in GitHub-flavored Markdown. "
+            "Use the documentation to specify exact toolchains, repo-specific testing commands, and prerequisites. "
+            "Do NOT hallucinate commands; rely on the code files in the repo, and give concrete roadmap to solve the issues."
         )
 
         user_prompt = (
             f"Repository: {repo_target}\n\n"
-            f"Open Issues Context:\n{issue_context}\n\n"
-            f"Generate a contributor roadmap based solely on this data."
+            f"{combined_input_context}\n\n"
+            f"Generate a contributor roadmap based strictly on this combined context."
         )
 
         messages = [
@@ -150,7 +223,7 @@ class ContributorRoadmapPipeline:
             HumanMessage(content=user_prompt),
         ]
 
-        print("-> Generating roadmap in a single pass...")
+        print("-> Generating roadmap with codebase context...")
         ai_msg = self.llm.invoke(messages)
 
         content = ai_msg.content
@@ -160,13 +233,13 @@ class ContributorRoadmapPipeline:
             final_text = str(content)
 
         self.logger.log(f"[FINAL RESPONSE]\n{final_text}")
-        return final_text, issue_context
+        return final_text, combined_input_context
 
 
 def main():
     github_token, gemini_key = get_credentials()
     parser = argparse.ArgumentParser(
-        description="Token-efficient roadmap generator from GitHub open issues."
+        description="Token-efficient roadmap generator from GitHub open issues and repo docs."
     )
     parser.add_argument("-r", "--repo", type=str, required=True, help="Target GitHub repo")
     parser.add_argument("-l", "--limit", type=int, default=8, help="Issues to retrieve (default: 8)")
@@ -177,13 +250,16 @@ def main():
     args = parser.parse_args()
 
     pipeline = ContributorRoadmapPipeline(model_name=args.model, log_file=args.log_file)
-    markdown_roadmap, issue_context = pipeline.run(repo_target=args.repo, limit=args.limit)
+    markdown_roadmap, total_context = pipeline.run(
+        repo_target=args.repo,
+        limit=args.limit,
+        github_token=github_token
+    )
 
-    # Perform hardcoded rule-based security scan
-    is_flagged, flags = SecurityScanner.scan(issue_context, markdown_roadmap)
+    # Perform hardcoded rule-based security scan on both incoming docs/issues and outgoing roadmap
+    is_flagged, flags = SecurityScanner.scan(total_context, markdown_roadmap)
     security_banner = SecurityScanner.format_banner(is_flagged, flags)
 
-    # Prepend banner to output markdown
     final_document = security_banner + markdown_roadmap
 
     with open(args.output, "w", encoding="utf-8") as f:
