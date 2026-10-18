@@ -13,6 +13,11 @@
 
 ---
 
+> **🤔 Can't I just ask an AI chatbot?**
+> You can, for a one-off. find_issue is for doing it **repeatably and safely**: it pulls issues directly from the GitHub API with your own token (no copy-pasting), gives you the same roadmap format every time with one command, and **scans untrusted issue text and the model's output for prompt injection and risky commands** before you act on anything. And it **doesn't hand you the finished code**: it gives you pointers on what to do and how to check your work, so you learn by doing the contribution yourself.
+
+---
+
 ## 💡 Why find_issue?
 
 You've just learnt to code. You're excited. Someone says *"try contributing to open source!"* and then you open a big repository and see **hundreds of issues**, unfamiliar jargon, and no idea where to begin.
