@@ -10,7 +10,7 @@ issues_data = []
 
 def fetch_issues(repo_name, limit):
     repo = g.get_repo(repo_name)
-    issues = repo.get_issues(state='open')
+    issues = repo.get_issues(state='open', labels=['good first issue', 'help wanted'])
     count = 0
     for issue in issues:
         if not issue.pull_request: 
