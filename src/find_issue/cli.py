@@ -5,8 +5,8 @@ import time
 from datetime import datetime
 from typing import Any, List, Union, Tuple
 
-from pr_helper.config_manager import get_credentials
-from pr_helper.git_finder import fetch_issues
+from find_issue.config_manager import get_credentials
+from find_issue.git_finder import fetch_issues
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI

@@ -1,0 +1,14 @@
+LICENSE
+README.md
+pyproject.toml
+src/find_issue/__init__.py
+src/find_issue/__main__.py
+src/find_issue/cli.py
+src/find_issue/config_manager.py
+src/find_issue/git_finder.py
+src/find_issue.egg-info/PKG-INFO
+src/find_issue.egg-info/SOURCES.txt
+src/find_issue.egg-info/dependency_links.txt
+src/find_issue.egg-info/entry_points.txt
+src/find_issue.egg-info/requires.txt
+src/find_issue.egg-info/top_level.txt
