@@ -17,7 +17,6 @@ start_time = time.time()
 class SecurityScanner:
     """Scans text for prompt injection patterns and malicious CLI commands using hardcoded rules."""
 
-    # Patterns indicating prompt injection / instruction hijacking attempts
     INJECTION_PATTERNS = [
         r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions",
         r"disregard\s+(all\s+)?(previous|prior|above)\s+instructions",
@@ -30,7 +29,7 @@ class SecurityScanner:
         r"forget\s+(all\s+)?previous\s+context",
     ]
 
-    # Signatures for high-risk commands and payloads
+   
     MALICIOUS_CMD_PATTERNS = [
         r"rm\s+-(rf|fr|r)\b",                   # Destructive file removal
         r">\s*/dev/sd[a-z]",                    # Direct drive writes
@@ -48,12 +47,11 @@ class SecurityScanner:
     def scan(cls, context_text: str, output_text: str) -> Tuple[bool, List[str]]:
         flags = []
 
-        # Check raw input context for injection triggers
         for pattern in cls.INJECTION_PATTERNS:
             if re.search(pattern, context_text, re.IGNORECASE):
                 flags.append(f"Prompt injection pattern detected in issue context: `{pattern}`")
 
-        # Check LLM output for destructive or unauthorized commands
+        
         for pattern in cls.MALICIOUS_CMD_PATTERNS:
             match = re.search(pattern, output_text, re.IGNORECASE)
             if match:
