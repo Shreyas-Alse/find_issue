@@ -3,3 +3,4 @@ OUTPUT.md
 steps.txt
 __pycache__/
 *.pyc
+test.py
