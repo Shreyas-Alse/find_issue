@@ -1,20 +1,93 @@
 import os
+import re
 import argparse
-
-from datetime import datetime
-from typing import Any, List, Union
-from pr_helper.config_manager import get_credentials
 import time
+from datetime import datetime
+from typing import Any, List, Union, Tuple
+
+from pr_helper.config_manager import get_credentials
+from pr_helper.git_finder import fetch_issues
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pr_helper.git_finder import fetch_issues
 
 start_time = time.time()
 
 
+class SecurityScanner:
+    """Scans text for prompt injection patterns and malicious CLI commands using hardcoded rules."""
+
+    # Patterns indicating prompt injection / instruction hijacking attempts
+    INJECTION_PATTERNS = [
+        r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions",
+        r"disregard\s+(all\s+)?(previous|prior|above)\s+instructions",
+        r"system\s*prompt\s*override",
+        r"you\s+are\s+now\s+(an?|in)\s+unrestricted",
+        r"jailbreak",
+        r"developer\s+mode\s+enabled",
+        r"do\s+anything\s+now",
+        r"new\s+system\s+directive",
+        r"forget\s+(all\s+)?previous\s+context",
+    ]
+
+    # Signatures for high-risk commands and payloads
+    MALICIOUS_CMD_PATTERNS = [
+        r"rm\s+-(rf|fr|r)\b",                   # Destructive file removal
+        r">\s*/dev/sd[a-z]",                    # Direct drive writes
+        r"mkfs(\.[a-z0-9]+)?\b",                # Filesystem wipe
+        r":\(\)\{\s*:\|:&\s*\};:",              # Fork bomb
+        r"(curl|wget)\s+.*\|\s*(bash|sh|zsh)",  # Unverified remote execution
+        r"\b(nc|ncat|netcat)\b.*-e\s+(/bin/)?(ba)?sh", # Reverse shell
+        r"/etc/shadow\b",                       # Sensitive credentials
+        r"/etc/passwd\b",
+        r"\b(chmod|chown)\s+(-R\s+)?777\b",    # Extreme permission modifications
+        r"dd\s+if=/dev/(zero|urandom)",         # Drive overwrite
+    ]
+
+    @classmethod
+    def scan(cls, context_text: str, output_text: str) -> Tuple[bool, List[str]]:
+        flags = []
+
+        # Check raw input context for injection triggers
+        for pattern in cls.INJECTION_PATTERNS:
+            if re.search(pattern, context_text, re.IGNORECASE):
+                flags.append(f"Prompt injection pattern detected in issue context: `{pattern}`")
+
+        # Check LLM output for destructive or unauthorized commands
+        for pattern in cls.MALICIOUS_CMD_PATTERNS:
+            match = re.search(pattern, output_text, re.IGNORECASE)
+            if match:
+                flags.append(f"High-risk command detected in output: `{match.group(0)}`")
+
+        is_flagged = len(flags) > 0
+        return is_flagged, flags
+
+    @classmethod
+    def format_banner(cls, is_flagged: bool, flags: List[str]) -> str:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if is_flagged:
+            reasons = "\n".join([f"- {flag}" for flag in flags])
+            return (
+                "> [!CAUTION]\n"
+                "> ### SECURITY ALERT: POTENTIAL MALICIOUS CONTENT DETECTED\n"
+                f"> **Scan Timestamp:** {timestamp}\n"
+                "> This roadmap generated warnings during automated static inspection. Issue data or model output matched known attack signatures.\n"
+                "> **DO NOT execute the commands below without thorough manual verification.**\n"
+                ">\n"
+                "> **Detected Flags:**\n"
+                f"{reasons}\n\n---\n\n"
+            )
+        else:
+            return (
+                "> [!NOTE]\n"
+                "> ### Security Verification: PASSED\n"
+                f"> **Scan Timestamp:** {timestamp}\n"
+                "> No prompt injection signatures or destructive system commands detected by rule-based filters. "
+                "Always review CLI commands before running them locally.\n\n---\n\n"
+            )
+
+
 class StepLogger:
-    """Manages file-based step logging."""
     def __init__(self, filename: str = "steps.txt"):
         self.filename = filename
         with open(self.filename, "w", encoding="utf-8") as f:
@@ -26,18 +99,13 @@ class StepLogger:
 
 
 def format_issues_compact(issues: list, repo_name: str, max_body_chars: int = 300) -> str:
-    """
-    Compresses issue data to bare essentials to minimize prompt tokens.
-    Excludes boilerplate and truncates aggressive body text.
-    """
     if not issues:
         return "No open issues found."
 
     compact = []
     for issue in issues:
-        # Strip noisy multi-newlines and markdown comments
         body = (issue.get("body") or "No description").strip()
-        body = " ".join(body.split())  # Collapse whitespace
+        body = " ".join(body.split())
         if len(body) > max_body_chars:
             body = body[:max_body_chars] + "..."
 
@@ -52,23 +120,20 @@ def format_issues_compact(issues: list, repo_name: str, max_body_chars: int = 30
 class ContributorRoadmapPipeline:
     def __init__(self, model_name: str = "gemma-4-26b-a4b-it", log_file: str = "steps.txt"):
         self.logger = StepLogger(log_file)
-        # Deterministic generation, minimal token waste on retries
         self.llm = ChatGoogleGenerativeAI(
             model=model_name,
             temperature=0.2,
             top_p=0.8,
-            max_output_tokens=2048,  # Caps output generation costs
+            max_output_tokens=2048,
         )
 
-    def run(self, repo_target: str, limit: int = 8) -> str:
-        # Step 1: Deterministic retrieval outside LLM context (Zero Token Cost)
+    def run(self, repo_target: str, limit: int = 8) -> Tuple[str, str]:
         print(f"-> Fetching {limit} issues for {repo_target} via API...")
         issues = fetch_issues(repo_target, limit)
         issue_context = format_issues_compact(issues, repo_target, max_body_chars=350)
-        
+
         self.logger.log(f"[PRE-PROCESSED CONTEXT]\n{issue_context}")
 
-        # Step 2: Single-turn structured synthesis (No multi-turn agent history overhead)
         system_prompt = (
             "You are an open-source mentor. Given raw issue summaries, select 3 genuinely beginner-to-intermediate. DO NOT TALK LIKE A PERSON "
             "issues and produce a concise onboarding roadmap in GitHub-flavored Markdown. "
@@ -89,8 +154,7 @@ class ContributorRoadmapPipeline:
 
         print("-> Generating roadmap in a single pass...")
         ai_msg = self.llm.invoke(messages)
-        
-        # Handle string or content list cleanly
+
         content = ai_msg.content
         if isinstance(content, list):
             final_text = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
@@ -98,7 +162,7 @@ class ContributorRoadmapPipeline:
             final_text = str(content)
 
         self.logger.log(f"[FINAL RESPONSE]\n{final_text}")
-        return final_text
+        return final_text, issue_context
 
 
 def main():
@@ -107,7 +171,6 @@ def main():
         description="Token-efficient roadmap generator from GitHub open issues."
     )
     parser.add_argument("-r", "--repo", type=str, required=True, help="Target GitHub repo")
-    # Reduced default issue limit from 15 to 8 (sufficient for selecting 3 issues)
     parser.add_argument("-l", "--limit", type=int, default=8, help="Issues to retrieve (default: 8)")
     parser.add_argument("-o", "--output", type=str, default="OUTPUT.md", help="Output file")
     parser.add_argument("--log-file", type=str, default="steps.txt", help="Execution log path")
@@ -116,14 +179,22 @@ def main():
     args = parser.parse_args()
 
     pipeline = ContributorRoadmapPipeline(model_name=args.model, log_file=args.log_file)
-    markdown_roadmap = pipeline.run(repo_target=args.repo, limit=args.limit)
+    markdown_roadmap, issue_context = pipeline.run(repo_target=args.repo, limit=args.limit)
+
+    # Perform hardcoded rule-based security scan
+    is_flagged, flags = SecurityScanner.scan(issue_context, markdown_roadmap)
+    security_banner = SecurityScanner.format_banner(is_flagged, flags)
+
+    # Prepend banner to output markdown
+    final_document = security_banner + markdown_roadmap
 
     with open(args.output, "w", encoding="utf-8") as f:
-        f.write(markdown_roadmap)
+        f.write(final_document)
 
     print("\nExecution complete:")
     print(f" - Log file: {args.log_file}")
     print(f" - Markdown roadmap: {args.output}")
+    print(f" - Security scan status: {'[FLAGGED RISKS]' if is_flagged else '[PASSED]'}")
     print(f" - Total execution time: {time.time() - start_time:.2f} seconds")
 
 
