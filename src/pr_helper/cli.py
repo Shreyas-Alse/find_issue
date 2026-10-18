@@ -69,7 +69,7 @@ class ContributorRoadmapPipeline:
 
         # Step 2: Single-turn structured synthesis (No multi-turn agent history overhead)
         system_prompt = (
-            "You are an open-source mentor. Given raw issue summaries, select 3 genuinely beginner-to-intermediate "
+            "You are an open-source mentor. Given raw issue summaries, select 3 genuinely beginner-to-intermediate. DO NOT TALK LIKE A PERSON "
             "issues and produce a concise onboarding roadmap in GitHub-flavored Markdown. "
             "Include prerequisites-highly technical, issue links, and clear local verification steps. "
             "Do NOT hallucinate CLI commands; if unverified, use generic instructions."
